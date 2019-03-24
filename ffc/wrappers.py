@@ -19,10 +19,13 @@ def generate_wrapper_code(analysis, prefix, object_names, classnames, parameters
     # Extract data from analysis
     form_data, elements, element_map, domains = analysis
 
+    print("************** domains", domains)
     if not form_data:
+        print("************** elements")
         capsules = _encapsulate_elements(elements, object_names, classnames)
         common_space = False
     else:
+        print("************** forms")
         capsules, common_space = _encapsule_forms(prefix, object_names, classnames, form_data, element_map)
 
     # Generate code
@@ -55,7 +58,6 @@ def _encapsulate_elements(elements, object_names, classnames):
 
 
 def _encapsule_forms(prefix, object_names, classnames, form_data, element_map):
-
     # FIXME: Figure what to do with coordinate maps. Can there be more
     # than 1?
     assert len(classnames["coordinate_maps"]) == 1
@@ -67,9 +69,11 @@ def _encapsule_forms(prefix, object_names, classnames, form_data, element_map):
         ]
 
         name = object_names.get(id(form.original_form), "%d" % i)
+        print("Name", name)
         coefficient_names = [
             object_names.get(id(obj), "w%d" % j) for j, obj in enumerate(form.reduced_coefficients)
         ]
+        print("coefficient_names", coefficient_names)
         ufc_form_name = classnames["forms"][i]
         ufc_elements = [classnames["elements"][j] for j in element_numbers]
         ufc_dofmaps = [classnames["dofmaps"][j] for j in element_numbers]

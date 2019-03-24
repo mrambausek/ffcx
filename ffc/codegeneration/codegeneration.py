@@ -20,6 +20,7 @@ from ffc.codegeneration.dofmap import ufc_dofmap_generator
 from ffc.codegeneration.finite_element import generator as ufc_finite_element_generator
 from ffc.codegeneration.form import ufc_form_generator
 from ffc.codegeneration.integrals import ufc_integral_generator
+from ffc.codegeneration.function_space import ufc_function_space_generator
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,10 @@ def generate_code(analysis, object_names, ir, parameters, jit):
     logger.debug("Generating code for integrals")
     code_integrals = [ufc_integral_generator(ir, parameters) for ir in ir_integrals]
 
+    # Generate code for function space
+    logger.debug("Generating code for function spaces")
+    code_function_space = [ufc_function_space_generator(ir) for ir in ir_forms]
+
     # Generate code for forms
     logger.debug("Generating code for forms")
     # FIXME: add coefficient names it IR
@@ -71,6 +76,13 @@ def generate_code(analysis, object_names, ir, parameters, jit):
             object_names.get(id(obj), "w%d" % j) for j, obj in enumerate(form.reduced_coefficients)
         ]
         coefficient_names.append(names)
+    # print("\n")
+    # print(ir_forms[0].keys())
+    # print("\n")
+    # print(ir_forms[0])
+    # print("\n")
+    # print(coefficient_names[0])
+    # print("\n")
     code_forms = [ufc_form_generator(ir, cnames, parameters) for ir, cnames in zip(ir_forms, coefficient_names)]
 
     # Extract additional includes

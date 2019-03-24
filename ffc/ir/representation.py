@@ -82,8 +82,8 @@ def compute_ir(analysis, prefix, parameters, jit=False):
     classnames = make_all_element_classnames(prefix, elements, coordinate_elements, parameters)
 
     # Skip processing elements if jitting forms
-    # NB! it's important that this happens _after_ the element numbers and classnames
-    # above have been created.
+    # NB! it's important that this happens _after_ the element numbers
+    # and classnames above have been created.
     if jit and form_datas:
         # Drop some processing
         elements = []
