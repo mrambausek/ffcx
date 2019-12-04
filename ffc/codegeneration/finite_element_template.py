@@ -59,12 +59,12 @@ int tabulate_reference_dof_coordinates_{factory_name}(double* restrict reference
   {tabulate_reference_dof_coordinates}
 }}
 
-const double** reference_dof_points_{factory_name}()
+const double* reference_dof_points_{factory_name}()
 {{
   {reference_dof_points}
 }}
 
-const int** reference_dof_point_indices_{factory_name}()
+const int* reference_dof_point_indices_{factory_name}()
 {{
   {reference_dof_point_indices}
 }}
@@ -97,6 +97,8 @@ ufc_finite_element* create_{factory_name}(void)
   element->transform_reference_basis_derivatives = transform_reference_basis_derivatives_{factory_name};
   element->transform_values = transform_values_{factory_name};
   element->tabulate_reference_dof_coordinates = tabulate_reference_dof_coordinates_{factory_name};
+  element->reference_dof_point_indices = reference_dof_point_indices_{factory_name};
+  element->reference_dof_points = reference_dof_points_{factory_name};
   element->num_sub_elements = {num_sub_elements};
   element->create_sub_element = create_sub_element_{factory_name};
   element->create = create_{factory_name};

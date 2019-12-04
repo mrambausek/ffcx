@@ -123,6 +123,10 @@ extern "C"
     int (*tabulate_reference_dof_coordinates)(
         double* restrict reference_dof_coordinates);
 
+    /// Return list of dof points
+    const double* (*reference_dof_points)(void);
+    const int* (*reference_dof_point_indices)(void);
+
     /// Return the number of sub elements (for a mixed element)
     int num_sub_elements;
 
