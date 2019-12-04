@@ -113,6 +113,35 @@ def tabulate_reference_dof_coordinates(L, ir, parameters):
     return [decl, copy, ret]
 
 
+def reference_dof_points(L, ir, parameters):
+
+    ir = ir.tabulate_dof_coordinates
+
+    # Raise error if tabulate_reference_dof_coordinates is ill-defined
+    if not ir:
+        return [L.Return(-1)]
+
+    # Extract coordinates and cell dimension
+    tdim = ir.tdim
+    points = ir.points
+    dof_to_point = ir.dof_to_point
+
+    # Reference coordinates
+    dof_X = L.Symbol("dof_X")
+    dof_X_values = [X[jj] for X in points for jj in range(tdim)]
+    pt_code = [L.ArrayDecl("static const double", dof_X, (len(points) * tdim, ), values=dof_X_values),
+               L.Return(dof_X)]
+
+    idx = L.Symbol("idx")
+    idx_code = [L.ArrayDecl("static const int", idx, (len(dof_to_point), ), values=dof_to_point),
+                L.Return(idx)]
+
+    print(L.StatementList(pt_code))
+    print(L.StatementList(idx_code))
+
+    return (pt_code, idx_code)
+
+
 def evaluate_reference_basis(L, ir, parameters):
     data = ir.evaluate_basis
     if isinstance(data, str):
@@ -387,6 +416,9 @@ def generator(ir, parameters):
 
     statements = tabulate_reference_dof_coordinates(L, ir, parameters)
     d["tabulate_reference_dof_coordinates"] = L.StatementList(statements)
+    pt_statements, idx_statements = reference_dof_points(L, ir, parameters)
+    d["reference_dof_points"] = L.StatementList(pt_statements)
+    d["reference_dof_point_indices"] = L.StatementList(idx_statements)
 
     statements = create_sub_element(L, ir)
     d["sub_element_declaration"] = sub_element_declaration(L, ir)

@@ -74,7 +74,8 @@ ir_integral = namedtuple('ir_integral', ['representation', 'integral_type', 'sub
                                          'unique_tables', 'unique_table_types',
                                          'piecewise_ir', 'varying_irs', 'all_num_points', 'classname',
                                          'prefix', 'integrals_metadata', 'integral_metadata'])
-ir_tabulate_dof_coordinates = namedtuple('ir_tabulate_dof_coordinates', ['tdim', 'gdim', 'points', 'cell_shape'])
+ir_tabulate_dof_coordinates = namedtuple('ir_tabulate_dof_coordinates', ['tdim', 'gdim', 'points',
+                                                                         'dof_to_point', 'cell_shape'])
 ir_evaluate_dof = namedtuple('ir_evaluate_dof', ['mappings', 'reference_value_size', 'physical_value_size',
                                                  'geometric_dimension', 'topological_dimension', 'dofs',
                                                  'physical_offsets', 'cell_shape'])
@@ -773,12 +774,21 @@ def _tabulate_dof_coordinates(ufl_element, element):
     if any(L is None for L in element.dual_basis()):
         return {}
 
+    # Find unique set of points, and mapping from dofs to points
+    dof_to_point = []
+    points = []
+    for L in element.dual_basis():
+        pt = sorted(L.pt_dict.keys())[0]
+        if pt not in points:
+            points.append(pt)
+        dof_to_point.append(points.index(pt))
+
     cell = ufl_element.cell()
-    return ir_tabulate_dof_coordinates(
-        tdim=cell.topological_dimension(),
-        gdim=cell.geometric_dimension(),
-        points=[sorted(L.pt_dict.keys())[0] for L in element.dual_basis()],
-        cell_shape=cell.cellname())
+    return ir_tabulate_dof_coordinates(tdim=cell.topological_dimension(),
+                                       gdim=cell.geometric_dimension(),
+                                       dof_to_point=dof_to_point,
+                                       points=points,
+                                       cell_shape=cell.cellname())
 
 
 def _create_foo_integral(prefix, form_id, integral_type, form_data):

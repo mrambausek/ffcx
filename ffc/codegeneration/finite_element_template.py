@@ -59,6 +59,16 @@ int tabulate_reference_dof_coordinates_{factory_name}(double* restrict reference
   {tabulate_reference_dof_coordinates}
 }}
 
+const double** reference_dof_points_{factory_name}()
+{{
+  {reference_dof_points}
+}}
+
+const int** reference_dof_point_indices_{factory_name}()
+{{
+  {reference_dof_point_indices}
+}}
+
 {sub_element_declaration}
 ufc_finite_element* create_sub_element_{factory_name}(int i)
 {{
