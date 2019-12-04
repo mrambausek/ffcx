@@ -119,7 +119,7 @@ def reference_dof_points(L, ir, parameters):
 
     # Raise error if tabulate_reference_dof_coordinates is ill-defined
     if not ir:
-        return [L.Return(-1)]
+        return ([L.Return(L.Null())], [L.Return(L.Null())])
 
     # Extract coordinates and cell dimension
     tdim = ir.tdim
