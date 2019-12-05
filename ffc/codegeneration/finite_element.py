@@ -113,6 +113,16 @@ def tabulate_reference_dof_coordinates(L, ir, parameters):
     return [decl, copy, ret]
 
 
+def block_structure(L, ir):
+    bs = ir.block_structure
+    # Prepend with the data size
+    bs = [len(bs)] + bs
+    bs_sym = L.Symbol("block_structure")
+    code = [L.ArrayDecl("static const int", bs_sym, (len(bs),), values=bs),
+            L.Return(bs_sym)]
+    return code
+
+
 def evaluate_reference_basis(L, ir, parameters):
     data = ir.evaluate_basis
     if isinstance(data, str):
@@ -369,6 +379,8 @@ def generator(ir, parameters):
     d["num_sub_elements"] = ir.num_sub_elements
 
     import ffc.codegeneration.C.cnodes as L
+
+    d["block_structure"] = L.StatementList(block_structure(L, ir))
 
     d["value_dimension"] = value_dimension(L, ir.value_shape)
     d["reference_value_dimension"] = reference_value_dimension(L, ir.reference_value_shape)

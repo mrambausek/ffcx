@@ -48,7 +48,7 @@ ir_form = namedtuple('ir_form', ['id', 'prefix', 'classname', 'signature', 'rank
 ir_element = namedtuple('ir_element', ['id', 'classname', 'signature', 'cell_shape',
                                        'topological_dimension',
                                        'geometric_dimension', 'space_dimension', 'value_shape',
-                                       'reference_value_shape', 'degree', 'family', 'evaluate_basis',
+                                       'reference_value_shape', 'block_structure', 'degree', 'family', 'evaluate_basis',
                                        'evaluate_dof', 'tabulate_dof_coordinates', 'num_sub_elements',
                                        'create_sub_element'])
 ir_dofmap = namedtuple('ir_dofmap', ['id', 'classname', 'signature', 'num_global_support_dofs',
@@ -171,6 +171,21 @@ def compute_ir(analysis: namedtuple, object_names, prefix, parameters, visualise
                    expressions=ir_expressions)
 
 
+def _compute_block_structure(ufl_element):
+
+    value_shape = ufl_element.value_shape()
+
+    if isinstance(ufl_element, (ufl.VectorElement, ufl.TensorElement)):
+        return [len(value_shape)] + list(value_shape)
+
+    # MixedElement but not Tensor or Vector Element - expand
+    if isinstance(ufl_element, ufl.MixedElement):
+        sub_elements = ufl_element.sub_elements()
+        return _compute_block_structure(sub_elements[0]) + _compute_block_structure(sub_elements[1])
+
+    return [len(value_shape)] + list(value_shape)
+
+
 def _compute_element_ir(ufl_element, element_numbers, classnames, epsilon):
     """Compute intermediate representation of element."""
     # Create FIAT element
@@ -190,6 +205,11 @@ def _compute_element_ir(ufl_element, element_numbers, classnames, epsilon):
     ir["space_dimension"] = fiat_element.space_dimension()
     ir["value_shape"] = ufl_element.value_shape()
     ir["reference_value_shape"] = ufl_element.reference_value_shape()
+
+    # Compute flattened block structure as list of ints
+    # Format is: [dataitem], [dataitem], ...
+    # Each dataitem: value_rank (0, 1, 2) followed by value_shape (of size value_rank)
+    ir["block_structure"] = _compute_block_structure(ufl_element)
 
     ir["degree"] = ufl_element.degree()
     ir["family"] = ufl_element.family()

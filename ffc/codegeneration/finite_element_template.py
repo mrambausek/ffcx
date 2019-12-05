@@ -59,6 +59,11 @@ int tabulate_reference_dof_coordinates_{factory_name}(double* restrict reference
   {tabulate_reference_dof_coordinates}
 }}
 
+const int* block_structure_{factory_name}(void)
+{{
+  {block_structure}
+}}
+
 {sub_element_declaration}
 ufc_finite_element* create_sub_element_{factory_name}(int i)
 {{
@@ -74,6 +79,7 @@ ufc_finite_element* create_{factory_name}(void)
   element->topological_dimension = {topological_dimension};
   element->geometric_dimension = {geometric_dimension};
   element->space_dimension = {space_dimension};
+  element->block_structure = block_structure_{factory_name};
   element->value_rank = {value_rank};
   element->value_dimension = value_dimension_{factory_name};
   element->value_size = {value_size};
