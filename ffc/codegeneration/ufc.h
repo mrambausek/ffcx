@@ -96,6 +96,8 @@ extern "C"
     /// Return the family of the finite element function space
     const char* family;
 
+    const int* (*block_structure)(void);
+
     int (*evaluate_reference_basis)(double* restrict reference_values,
                                     int num_points, const double* restrict X);
 
