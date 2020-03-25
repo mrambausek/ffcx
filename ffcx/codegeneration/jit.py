@@ -78,7 +78,6 @@ def get_cached_module(module_name, object_names, cache_dir, timeout):
                 spec.loader.exec_module(compiled_module)
 
                 compiled_objects = [getattr(compiled_module.lib, "create_" + name)() for name in object_names]
-                print("NNNN Not from cache:", cache_dir)
                 return compiled_objects, compiled_module
 
             logger.info("Waiting for {} to appear.".format(str(ready_name)))
