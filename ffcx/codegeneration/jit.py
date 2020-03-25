@@ -156,11 +156,14 @@ def compile_forms(forms, parameters=None, cache_dir=None, timeout=10, cffi_extra
 
     form_names = [ffcx.naming.form_name(form, i) for i, form in enumerate(forms)]
 
+    print("** Cache dir:", cache_dir)
     if cache_dir is not None:
         cache_dir = Path(cache_dir)
         obj, mod = get_cached_module(module_name, form_names, cache_dir, timeout)
         if obj is not None:
+            print("** From cache:", cache_dir)
             return obj, mod
+        print("** Not from cache:", cache_dir)
     else:
         cache_dir = Path(tempfile.mkdtemp())
 
