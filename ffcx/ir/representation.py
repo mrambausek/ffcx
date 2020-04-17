@@ -542,6 +542,26 @@ def _evaluate_basis(ufl_element, fiat_element, epsilon):
     cell = ufl_element.cell()
     cellname = cell.cellname()
 
+    # Handle Mixed and EnrichedElements by extracting 'sub' elements.
+    elements = _extract_elements(fiat_element)
+
+    # This function is evidently not implemented for TensorElements
+    for e in elements:
+        if (len(e.value_shape()) > 1) and (e.num_sub_elements() != 1):
+            return "Function not supported/implemented for TensorElements."
+
+    # Handle QuadratureElement, not supported because the basis is only
+    # defined at the dof coordinates where the value is 1, so not very
+    # interesting.
+    for e in elements:
+        if isinstance(e, QuadratureElement):
+            return "Function not supported/implemented for QuadratureElement."
+        if isinstance(e, FlattenedDimensions) and isinstance(e.element, QuadratureElement):
+            # Case for quad/hex cell
+            return "Function not supported/implemented for QuadratureElement."
+        if isinstance(e, HDivTrace):
+            return "Function not supported for Trace elements"
+
     # Initialise data with 'global' values.
     data = {
         "reference_value_size": ufl_element.reference_value_size(),
