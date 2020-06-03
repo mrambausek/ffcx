@@ -386,3 +386,19 @@ def _get_num_members_from_fiat(e):
     if isinstance(e, TensorProductElement):
         return _get_coeffs_from_fiat(e).shape[0]
     return e.get_num_members(e.degree())
+
+
+def _get_entity_dofs_from_fiat(fiat_element):
+    entity_dofs = fiat_element.entity_dofs()
+    if 0 in entity_dofs:
+        return entity_dofs
+
+    ## TODO: what order are (0,1) and (1,0) in???
+    tdim = max(sum(i) + 1 for i in entity_dofs)
+    flattened = {i: {} for i in range(tdim)}
+    for tp, dof_lists in entity_dofs.items():
+        dim = sum(tp)
+        start = len(flattened[dim])
+        for n, dofs in dof_lists.items():
+            flattened[dim][start + n] = dofs
+    return flattened

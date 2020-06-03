@@ -27,11 +27,11 @@ from ffcx import naming
 from ffcx.fiatinterface import (EnrichedElement, FlattenedDimensions,
                                 MixedElement, QuadratureElement, SpaceOfReals,
                                 create_element, _get_coeffs_from_fiat,
-                                _get_dmats_from_fiat, _get_num_members_from_fiat)
+                                _get_dmats_from_fiat, _get_num_members_from_fiat,
+                                _get_entity_dofs_from_fiat)
 from FIAT.tensor_product import TensorProductElement
 from ffcx.ir import dof_permutations
 from FIAT.hdiv_trace import HDivTrace
-from ffcx.ir.dof_permutations import get_entity_dofs
 
 logger = logging.getLogger(__name__)
 
@@ -195,7 +195,7 @@ def _compute_element_ir(ufl_element, element_numbers, finite_element_names, epsi
     ir["dof_reflection_entities"] = dof_permutations.reflection_entities(ufl_element)
 
     ir["dof_types"] = [i.functional_type for i in fiat_element.dual_basis()]
-    ir["entity_dofs"] = get_entity_dofs(fiat_element)
+    ir["entity_dofs"] = _get_entity_dofs_from_fiat(fiat_element)
 
     return ir_element(**ir)
 
@@ -207,7 +207,7 @@ def _compute_dofmap_ir(ufl_element, element_numbers, dofmap_names):
 
     # Precompute repeatedly used items
     num_dofs_per_entity = _num_dofs_per_entity(fiat_element)
-    entity_dofs = get_entity_dofs(fiat_element)
+    entity_dofs = _get_entity_dofs_from_fiat(fiat_element)
 
     # Store id
     ir = {"id": element_numbers[ufl_element]}
@@ -753,7 +753,7 @@ def _num_dofs_per_entity(fiat_element):
     Example: Lagrange of degree 3 on triangle: [1, 2, 1]
 
     """
-    entity_dofs = get_entity_dofs(fiat_element)
+    entity_dofs = _get_entity_dofs_from_fiat(fiat_element)
     return [len(entity_dofs[e][0]) for e in sorted(entity_dofs.keys())]
 
 

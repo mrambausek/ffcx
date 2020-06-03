@@ -6,7 +6,7 @@
 
 import warnings
 import math
-from ffcx.fiatinterface import create_element
+from ffcx.fiatinterface import create_element, _get_entity_dofs_from_fiat
 
 # TODO: This information should be moved to FIAT instead of being reverse engineered here
 # TODO: Currently none of the vector-valued stuff has been tested on quads and hexes
@@ -75,7 +75,7 @@ def base_permutations_from_subdofmap(ufl_element):
     num_perms = sum([0, 1, 2, 4][i] * j for i, j in enumerate(entity_counts[:tdim]))
 
     dof_types = [e.functional_type for e in fiat_element.dual_basis()]
-    entity_dofs = get_entity_dofs(fiat_element)
+    entity_dofs = _get_entity_dofs_from_fiat(fiat_element)
 
     perms = identity_permutations(num_perms, num_dofs)
     perm_n = 0
@@ -135,7 +135,7 @@ def reflection_entities_from_subdofmap(ufl_element):
     entity_counts = get_entity_counts(ufl_element)
 
     dof_types = [e.functional_type for e in fiat_element.dual_basis()]
-    entity_dofs = get_entity_dofs(fiat_element)
+    entity_dofs = _get_entity_dofs_from_fiat(fiat_element)
 
     # TODO: correct the types of these DOFs in FIAT instead of overwriting here
     if ufl_element.family() == "RTCF":
@@ -182,7 +182,7 @@ def face_tangents_from_subdofmap(ufl_element):
     cname = ufl_element.cell().cellname()
 
     dof_types = [e.functional_type for e in fiat_element.dual_basis()]
-    entity_dofs = get_entity_dofs(fiat_element)
+    entity_dofs = _get_entity_dofs_from_fiat(fiat_element)
 
     rotations = []
     if cname == "tetrahedron":
@@ -206,22 +206,6 @@ def face_tangents_from_subdofmap(ufl_element):
                     rotations.append(((2, entity_n), dof_pair))
 
     return rotations
-
-
-def get_entity_dofs(fiat_element):
-    entity_dofs = fiat_element.entity_dofs()
-    if 0 in entity_dofs:
-        return entity_dofs
-
-    ## TODO: what order are (0,1) and (1,0) in???
-    tdim = max(sum(i) + 1 for i in entity_dofs)
-    flattened = {i: {} for i in range(tdim)}
-    for tp, dof_lists in entity_dofs.items():
-        dim = sum(tp)
-        start = len(flattened[dim])
-        for n, dofs in dof_lists.items():
-            flattened[dim][start + n] = dofs
-    return flattened
 
 
 def get_entity_counts(ufl_element):
