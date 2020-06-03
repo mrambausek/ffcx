@@ -393,7 +393,7 @@ def _get_entity_dofs_from_fiat(fiat_element):
     if 0 in entity_dofs:
         return entity_dofs
 
-    ## TODO: what order are (0,1) and (1,0) in???
+    # TODO: what order are (0,1) and (1,0) in???
     tdim = max(sum(i) + 1 for i in entity_dofs)
     flattened = {i: {} for i in range(tdim)}
     for tp, dof_lists in entity_dofs.items():
