@@ -68,17 +68,18 @@ def base_permutations_from_subdofmap(ufl_element):
     tdim = ufl_element.cell().topological_dimension()
 
     # Get the entity counts and shape of each entity for the cell type
-    entity_counts = get_entity_counts(fiat_element)
+    entity_counts = get_entity_counts(ufl_element)
     entity_functions = get_entity_functions(ufl_element)
 
     # There is 1 permutation for a 1D entity, 2 for a 2D entity and 4 for a 3D entity
     num_perms = sum([0, 1, 2, 4][i] * j for i, j in enumerate(entity_counts[:tdim]))
 
     dof_types = [e.functional_type for e in fiat_element.dual_basis()]
-    entity_dofs = fiat_element.entity_dofs()
+    entity_dofs = get_entity_dofs(fiat_element)
 
     perms = identity_permutations(num_perms, num_dofs)
     perm_n = 0
+
     # Iterate through the entities of the reference element
     for dim in range(1, tdim):
         for entity_n in range(entity_counts[dim]):
@@ -131,10 +132,10 @@ def reflection_entities_from_subdofmap(ufl_element):
     tdim = ufl_element.cell().topological_dimension()
 
     # Get the entity counts for the cell type
-    entity_counts = get_entity_counts(fiat_element)
+    entity_counts = get_entity_counts(ufl_element)
 
     dof_types = [e.functional_type for e in fiat_element.dual_basis()]
-    entity_dofs = fiat_element.entity_dofs()
+    entity_dofs = get_entity_dofs(fiat_element)
 
     # TODO: correct the types of these DOFs in FIAT instead of overwriting here
     if ufl_element.family() == "RTCF":
@@ -145,6 +146,8 @@ def reflection_entities_from_subdofmap(ufl_element):
 
     reflections = [None for i in range(num_dofs)]
     # Iterate through the entities of the reference element
+    print(entity_dofs)
+    print(entity_counts)
     for dim in range(1, tdim):
         for entity_n in range(entity_counts[dim]):
             dofs = entity_dofs[dim][entity_n]
@@ -179,7 +182,7 @@ def face_tangents_from_subdofmap(ufl_element):
     cname = ufl_element.cell().cellname()
 
     dof_types = [e.functional_type for e in fiat_element.dual_basis()]
-    entity_dofs = fiat_element.entity_dofs()
+    entity_dofs = get_entity_dofs(fiat_element)
 
     rotations = []
     if cname == "tetrahedron":
@@ -205,9 +208,38 @@ def face_tangents_from_subdofmap(ufl_element):
     return rotations
 
 
-def get_entity_counts(fiat_element):
-    topology = fiat_element.ref_el.topology
-    return [len(topology[i]) for i in range(len(topology))]
+def get_entity_dofs(fiat_element):
+    entity_dofs = fiat_element.entity_dofs()
+    if 0 in entity_dofs:
+        return entity_dofs
+
+    ## TODO: what order are (0,1) and (1,0) in???
+    tdim = max(sum(i) + 1 for i in entity_dofs)
+    flattened = {i: {} for i in range(tdim)}
+    for tp, dof_lists in entity_dofs.items():
+        dim = sum(tp)
+        start = len(flattened[dim])
+        for n, dofs in dof_lists.items():
+            flattened[dim][start + n] = dofs
+    return flattened
+
+
+def get_entity_counts(ufl_element):
+    cname = ufl_element.cell().cellname()
+    if cname == 'point':
+        return [1]
+    elif cname == 'interval':
+        return [2, 1]
+    elif cname == 'triangle':
+        return [3, 3, 1]
+    elif cname == 'tetrahedron':
+        return [4, 6, 4, 1]
+    elif cname == 'quadrilateral':
+        return [4, 4, 1]
+    elif cname == 'hexahedron':
+        return [8, 12, 6, 1]
+    else:
+        raise ValueError("Unrecognised cell type")
 
 
 def get_entity_functions(ufl_element):
