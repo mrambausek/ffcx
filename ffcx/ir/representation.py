@@ -18,21 +18,19 @@ representation under the key "foo".
 
 import itertools
 import logging
-from collections import namedtuple
 import warnings
+from collections import namedtuple
 
 import numpy
 
+import FIAT
 import ufl
 from ffcx import naming
-from ffcx.fiatinterface import (EnrichedElement, FlattenedDimensions,
-                                MixedElement, QuadratureElement, SpaceOfReals,
-                                create_element)
+from ffcx.fiatinterface import SpaceOfReals, create_element
 from ffcx.ir import dof_permutations
 from ffcx.ir.integral import compute_integral_ir
 from ffcx.ir.representationutils import (QuadratureRule,
                                          create_quadrature_points_and_weights)
-from FIAT.hdiv_trace import HDivTrace
 from ufl.classes import Integral
 from ufl.sorting import sorted_expr_sum
 
@@ -58,12 +56,13 @@ ir_element = namedtuple('ir_element', ['id', 'name', 'signature', 'cell_shape',
                                        'geometric_dimension', 'space_dimension', 'value_shape',
                                        'reference_value_shape', 'degree', 'family', 'evaluate_basis',
                                        'evaluate_dof', 'tabulate_dof_coordinates', 'num_sub_elements',
-                                       'base_permutations', 'dof_reflection_entities',
+                                       'base_permutations', 'dof_reflection_entities', 'block_size',
                                        'create_sub_element', 'dof_types', 'entity_dofs'])
 ir_dofmap = namedtuple('ir_dofmap', ['id', 'name', 'signature', 'num_global_support_dofs',
                                      'num_element_support_dofs', 'num_entity_dofs',
                                      'tabulate_entity_dofs', 'base_permutations', 'dof_reflection_entities',
-                                     'num_sub_dofmaps', 'create_sub_dofmap', 'dof_types'])
+                                     'num_sub_dofmaps', 'create_sub_dofmap', 'dof_types',
+                                     'block_size'])
 ir_coordinate_map = namedtuple('ir_coordinate_map', ['id', 'prefix', 'name', 'signature', 'cell_shape',
                                                      'topological_dimension',
                                                      'geometric_dimension',
@@ -83,7 +82,7 @@ ir_integral = namedtuple('ir_integral', ['integral_type', 'subdomain_id',
                                          'coefficient_offsets', 'original_constant_offsets', 'params', 'cell_shape',
                                          'unique_tables', 'unique_table_types', 'table_dofmaps',
                                          'table_dof_face_tangents', 'table_dof_reflection_entities',
-                                         'integrand', 'name', 'precision'])
+                                         'integrand', 'name', 'precision', 'needs_permutation_data'])
 ir_tabulate_dof_coordinates = namedtuple('ir_tabulate_dof_coordinates', ['tdim', 'gdim', 'points', 'cell_shape'])
 ir_evaluate_dof = namedtuple('ir_evaluate_dof', ['mappings', 'reference_value_size', 'physical_value_size',
                                                  'geometric_dimension', 'topological_dimension', 'dofs',
@@ -93,7 +92,8 @@ ir_expression = namedtuple('ir_expression', ['name', 'element_dimensions', 'para
                                              'table_dof_face_tangents', 'table_dof_reflection_entities',
                                              'coefficient_numbering', 'coefficient_offsets',
                                              'integral_type', 'entitytype', 'tensor_shape', 'expression_shape',
-                                             'original_constant_offsets', 'original_coefficient_positions', 'points'])
+                                             'original_constant_offsets', 'original_coefficient_positions', 'points',
+                                             'needs_permutation_data'])
 
 ir_data = namedtuple('ir_data', ['elements', 'dofmaps', 'coordinate_mappings', 'integrals', 'forms', 'expressions'])
 
@@ -188,6 +188,13 @@ def _compute_element_ir(ufl_element, element_numbers, finite_element_names, epsi
     ir["num_sub_elements"] = ufl_element.num_sub_elements()
     ir["create_sub_element"] = [finite_element_names[e] for e in ufl_element.sub_elements()]
 
+    if isinstance(ufl_element, ufl.VectorElement) or isinstance(ufl_element, ufl.TensorElement):
+        ir["block_size"] = ufl_element.num_sub_elements()
+        ufl_element = ufl_element.sub_elements()[0]
+        fiat_element = create_element(ufl_element)
+    else:
+        ir["block_size"] = 1
+
     ir["base_permutations"] = dof_permutations.base_permutations(ufl_element)
     ir["dof_reflection_entities"] = dof_permutations.reflection_entities(ufl_element)
 
@@ -205,25 +212,36 @@ def _compute_dofmap_ir(ufl_element, element_numbers, dofmap_names):
     # Create FIAT element
     fiat_element = create_element(ufl_element)
 
-    # Precompute repeatedly used items
-    num_dofs_per_entity = _num_dofs_per_entity(fiat_element)
-    entity_dofs = fiat_element.entity_dofs()
-
     # Store id
     ir = {"id": element_numbers[ufl_element]}
     ir["name"] = dofmap_names[ufl_element]
 
     # Compute data for each function
     ir["signature"] = "FFCX dofmap for " + repr(ufl_element)
-    ir["num_global_support_dofs"] = _num_global_support_dofs(fiat_element)
-    ir["num_element_support_dofs"] = fiat_element.space_dimension() - ir["num_global_support_dofs"]
-    ir["num_entity_dofs"] = num_dofs_per_entity
-    ir["tabulate_entity_dofs"] = (entity_dofs, num_dofs_per_entity)
-    ir["num_sub_dofmaps"] = ufl_element.num_sub_elements()
     ir["create_sub_dofmap"] = [dofmap_names[e] for e in ufl_element.sub_elements()]
-    ir["dof_types"] = [i.functional_type for i in fiat_element.dual_basis()]
+    ir["num_sub_dofmaps"] = ufl_element.num_sub_elements()
+
+    if isinstance(ufl_element, ufl.VectorElement) or isinstance(ufl_element, ufl.TensorElement):
+        ir["block_size"] = ufl_element.num_sub_elements()
+        ufl_element = ufl_element.sub_elements()[0]
+        fiat_element = create_element(ufl_element)
+    else:
+        ir["block_size"] = 1
+
     ir["base_permutations"] = dof_permutations.base_permutations(ufl_element)
     ir["dof_reflection_entities"] = dof_permutations.reflection_entities(ufl_element)
+
+    # Precompute repeatedly used items
+    num_dofs_per_entity = _num_dofs_per_entity(fiat_element)
+    entity_dofs = fiat_element.entity_dofs()
+
+    ir["num_entity_dofs"] = num_dofs_per_entity
+    ir["tabulate_entity_dofs"] = (entity_dofs, num_dofs_per_entity)
+
+    ir["num_global_support_dofs"] = _num_global_support_dofs(fiat_element)
+    ir["num_element_support_dofs"] = fiat_element.space_dimension() - ir["num_global_support_dofs"]
+
+    ir["dof_types"] = [i.functional_type for i in fiat_element.dual_basis()]
 
     return ir_dofmap(**ir)
 
@@ -339,7 +357,7 @@ def _compute_coordinate_mapping_ir(ufl_coordinate_element,
 
 def _num_global_support_dofs(fiat_element):
     """Compute number of global support dofs."""
-    if not isinstance(fiat_element, MixedElement):
+    if not isinstance(fiat_element, FIAT.MixedElement):
         if isinstance(fiat_element, SpaceOfReals):
             return 1
         return 0
@@ -587,7 +605,7 @@ def _compute_form_ir(form_data, form_id, prefix, element_numbers, finite_element
 
 def _compute_expression_ir(expression, index, prefix, analysis, parameters, visualise):
 
-    logger.info("Computing IR for expression {}".format(str(expression)))
+    logger.info("Computing IR for expression {}".format(index))
 
     # Compute representation
     ir = {}
@@ -687,7 +705,7 @@ def _generate_reference_offsets(fiat_element, offset=0):
     element representation.
 
     """
-    if isinstance(fiat_element, MixedElement):
+    if isinstance(fiat_element, FIAT.MixedElement):
         offsets = []
         for e in fiat_element.elements():
             offsets += _generate_reference_offsets(e, offset)
@@ -695,7 +713,7 @@ def _generate_reference_offsets(fiat_element, offset=0):
             # means reference_value_shape
             offset += ufl.utils.sequences.product(e.value_shape())
         return offsets
-    elif isinstance(fiat_element, EnrichedElement):
+    elif isinstance(fiat_element, FIAT.EnrichedElement):
         offsets = []
         for e in fiat_element.elements():
             offsets += _generate_reference_offsets(e, offset)
@@ -790,7 +808,7 @@ def _evaluate_dof(ufl_element, fiat_element):
 
 def _extract_elements(fiat_element):
     new_elements = []
-    if isinstance(fiat_element, (MixedElement, EnrichedElement)):
+    if isinstance(fiat_element, (FIAT.MixedElement, FIAT.EnrichedElement)):
         for e in fiat_element.elements():
             new_elements += _extract_elements(e)
     else:
@@ -803,11 +821,15 @@ def _evaluate_basis(ufl_element, fiat_element, epsilon):
     cell = ufl_element.cell()
     cellname = cell.cellname()
 
-    # Handle Mixed and EnrichedElements by extracting 'sub' elements.
-    elements = _extract_elements(fiat_element)
-    physical_offsets = _generate_physical_offsets(ufl_element)
-    reference_offsets = _generate_reference_offsets(fiat_element)
-    mappings = fiat_element.mapping()
+    if isinstance(ufl_element, ufl.VectorElement) or isinstance(ufl_element, ufl.TensorElement):
+        # If VectorElement, each element in the MixedElement is the same
+        return _evaluate_basis(ufl_element.sub_elements()[0], fiat_element.elements()[0], epsilon)
+    else:
+        # Handle Mixed and EnrichedElements by extracting 'sub' elements.
+        elements = _extract_elements(fiat_element)
+        physical_offsets = _generate_physical_offsets(ufl_element)
+        reference_offsets = _generate_reference_offsets(fiat_element)
+        mappings = fiat_element.mapping()
 
     # This function is evidently not implemented for TensorElements
     for e in elements:
@@ -818,12 +840,12 @@ def _evaluate_basis(ufl_element, fiat_element, epsilon):
     # defined at the dof coordinates where the value is 1, so not very
     # interesting.
     for e in elements:
-        if isinstance(e, QuadratureElement):
+        if isinstance(e, FIAT.QuadratureElement):
             return "Function not supported/implemented for QuadratureElement."
-        if isinstance(e, FlattenedDimensions) and isinstance(e.element, QuadratureElement):
+        if isinstance(e, FIAT.tensor_product.FlattenedDimensions) and isinstance(e.element, FIAT.QuadratureElement):
             # Case for quad/hex cell
             return "Function not supported/implemented for QuadratureElement."
-        if isinstance(e, HDivTrace):
+        if isinstance(e, FIAT.HDivTrace):
             return "Function not supported for Trace elements"
 
     # Initialise data with 'global' values.
@@ -843,12 +865,12 @@ def _evaluate_basis(ufl_element, fiat_element, epsilon):
     dofs_data = []
     for e in elements:
         num_components = ufl.utils.sequences.product(e.value_shape())
-        if isinstance(e, FlattenedDimensions):
+        if isinstance(e, FIAT.tensor_product.FlattenedDimensions):
             # Tensor product element
             A = e.element.A
             B = e.element.B
             # Attach suitable coefficients to element
-            if isinstance(A, FlattenedDimensions):
+            if isinstance(A, FIAT.tensor_product.FlattenedDimensions):
                 # This is for hexahedral element
                 ac = A.element.A.get_coeffs()
                 bc = A.element.B.get_coeffs()
@@ -955,6 +977,9 @@ def _tabulate_dof_coordinates(ufl_element, element):
     if any(L is None for L in element.dual_basis()):
         return {}
 
+    if isinstance(ufl_element, ufl.VectorElement) or isinstance(ufl_element, ufl.TensorElement):
+        element = element.elements()[0]
+
     cell = ufl_element.cell()
     return ir_tabulate_dof_coordinates(
         tdim=cell.topological_dimension(),
@@ -990,7 +1015,7 @@ def _create_foo_integral(prefix, form_id, integral_type, form_data):
 
 
 def all_elements(fiat_element):
-    if isinstance(fiat_element, MixedElement):
+    if isinstance(fiat_element, FIAT.MixedElement):
         return fiat_element.elements()
     return [fiat_element]
 

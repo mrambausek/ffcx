@@ -62,6 +62,8 @@ def compute_integral_ir(cell, integral_type, entitytype, integrands, argument_sh
     ir["table_dof_face_tangents"] = {}
     ir["table_dof_reflection_entities"] = {}
 
+    ir["needs_permutation_data"] = 0
+
     for quadrature_rule, integrand in integrands.items():
 
         expression = integrand
@@ -86,7 +88,8 @@ def compute_integral_ir(cell, integral_type, entitytype, integrands, argument_sh
                              if is_modified_terminal(v['expression'])}
 
         (unique_tables, unique_table_types, unique_table_num_dofs,
-         mt_unique_table_reference, table_origins) = build_optimized_tables(
+         mt_unique_table_reference, table_origins,
+         needs_permutation_data) = build_optimized_tables(
             quadrature_rule,
             cell,
             integral_type,
@@ -96,9 +99,17 @@ def compute_integral_ir(cell, integral_type, entitytype, integrands, argument_sh
             rtol=p["table_rtol"],
             atol=p["table_atol"])
 
+        if needs_permutation_data:
+            ir["needs_permutation_data"] = 1
+
         for k, v in table_origins.items():
             ir["table_dof_face_tangents"][k] = dof_permutations.face_tangents(v[0])
             ir["table_dof_reflection_entities"][k] = dof_permutations.reflection_entities(v[0])
+            for j in ir["table_dof_face_tangents"][k]:
+                if j is not None:
+                    ir["needs_permutation_data"] = 1
+            if len(ir["table_dof_reflection_entities"][k]) > 0:
+                ir["needs_permutation_data"] = 1
 
         for td in mt_unique_table_reference.values():
             ir["table_dofmaps"][td.name] = td.dofmap
@@ -336,19 +347,10 @@ def analyse_dependencies(F, mt_unique_table_reference):
 def replace_quadratureweight(expression):
     """Remove any QuadratureWeight terminals and replace with 1.0."""
 
-    r = _find_terminals_in_ufl_expression(expression, QuadratureWeight)
-    replace_map = {q: 1.0 for q in r}
-
-    return ufl.algorithms.replace(expression, replace_map)
-
-
-def _find_terminals_in_ufl_expression(e, etype):
-    """Recursively search expression for terminals of type etype."""
     r = []
-    for op in e.ufl_operands:
-        if is_modified_terminal(op) and isinstance(op, etype):
-            r.append(op)
-        else:
-            r += _find_terminals_in_ufl_expression(op, etype)
+    for node in ufl.corealg.traversal.unique_pre_traversal(expression):
+        if is_modified_terminal(node) and isinstance(node, QuadratureWeight):
+            r.append(node)
 
-    return r
+    replace_map = {q: 1.0 for q in r}
+    return ufl.algorithms.replace(expression, replace_map)

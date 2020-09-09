@@ -85,12 +85,14 @@ def generator(ir, parameters):
         implementation = ufc_integrals.custom_factory.format(
             factory_name=factory_name,
             enabled_coefficients=code["enabled_coefficients"],
-            tabulate_tensor=tabulate_tensor_fn)
+            tabulate_tensor=tabulate_tensor_fn,
+            needs_permutation_data=ir.needs_permutation_data)
     else:
         implementation = ufc_integrals.factory.format(
             factory_name=factory_name,
             enabled_coefficients=code["enabled_coefficients"],
-            tabulate_tensor=tabulate_tensor_fn)
+            tabulate_tensor=tabulate_tensor_fn,
+            needs_permutation_data=ir.needs_permutation_data)
 
     return declaration, implementation
 
@@ -669,7 +671,6 @@ class IntegralGenerator(object):
 
     def generate_dofblock_partition(self, quadrature_rule):
         block_contributions = self.ir.integrand[quadrature_rule]["block_contributions"]
-
         preparts = []
         quadparts = []
         blocks = [(blockmap, blockdata)
@@ -809,9 +810,6 @@ class IntegralGenerator(object):
         # Define fw = f * weight
         assert not blockdata.transposed, "Not handled yet"
 
-        # Fetch code to access modified arguments
-        arg_factors = self.get_arg_factors(blockdata, block_rank, quadrature_rule, iq, B_indices)
-
         fw_rhs = L.float_product([f, weight])
         if not isinstance(fw_rhs, L.Product):
             fw = fw_rhs
@@ -829,17 +827,50 @@ class IntegralGenerator(object):
         Asym = self.backend.symbols.element_tensor()
         A = L.FlattenedArray(Asym, dims=A_shape)
 
-        B_rhs = L.float_product([fw] + arg_factors)
-        A_indices = []
-
+        # Check if DOFs in dofrange are equally spaced
+        expand_loop = False
         for i, bm in enumerate(blockmap):
-            offset = blockmap[i][0]
-            A_indices.append(arg_indices[i] + offset)
+            for a, b in zip(bm[1:-1], bm[2:]):
+                if b - a != bm[1] - bm[0]:
+                    expand_loop = True
+                    break
+            else:
+                continue
+            break
 
-        body = L.AssignAdd(A[A_indices], B_rhs)
+        if expand_loop:
+            # If DOFs in dofrange are not equally spaced, then expand out the for loop
+            for A_indices, B_indices in zip(itertools.product(*blockmap),
+                                            itertools.product(*[range(len(b)) for b in blockmap])):
+                quadparts += [
+                    L.AssignAdd(
+                        A[A_indices],
+                        L.float_product([fw] + self.get_arg_factors(
+                            blockdata, block_rank,
+                            quadrature_rule, iq, B_indices)
+                        )
+                    )
+                ]
+        else:
+            # Fetch code to access modified arguments
+            arg_factors = self.get_arg_factors(blockdata, block_rank, quadrature_rule, iq, B_indices)
 
-        for i in reversed(range(block_rank)):
-            body = L.ForRange(B_indices[i], 0, blockdims[i], body=body)
-        quadparts += [body]
+            B_rhs = L.float_product([fw] + arg_factors)
+            A_indices = []
+
+            for bm, index in zip(blockmap, arg_indices):
+                # TODO: switch order here? (optionally)
+                offset = bm[0]
+                if len(bm) == 1:
+                    A_indices.append(index + offset)
+                else:
+                    block_size = bm[1] - bm[0]
+                    A_indices.append(block_size * index + offset)
+
+            body = L.AssignAdd(A[A_indices], B_rhs)
+
+            for i in reversed(range(block_rank)):
+                body = L.ForRange(B_indices[i], 0, blockdims[i], body=body)
+            quadparts += [body]
 
         return preparts, quadparts
