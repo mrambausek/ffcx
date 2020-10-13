@@ -85,12 +85,14 @@ def generator(ir, parameters):
         implementation = ufc_integrals.custom_factory.format(
             factory_name=factory_name,
             enabled_coefficients=code["enabled_coefficients"],
-            tabulate_tensor=tabulate_tensor_fn)
+            tabulate_tensor=tabulate_tensor_fn,
+            needs_permutation_data=ir.needs_permutation_data)
     else:
         implementation = ufc_integrals.factory.format(
             factory_name=factory_name,
             enabled_coefficients=code["enabled_coefficients"],
-            tabulate_tensor=tabulate_tensor_fn)
+            tabulate_tensor=tabulate_tensor_fn,
+            needs_permutation_data=ir.needs_permutation_data)
 
     return declaration, implementation
 
@@ -327,7 +329,6 @@ class IntegralGenerator(object):
                 "static const double", name, table.shape, table, alignas=alignas, padlen=padlen)]
 
         dofmap = self.ir.table_dofmaps[name]
-        index_names = ["ind_" + str(i) if j > 1 else 0 for i, j in enumerate(table.shape[:-1])]
 
         # Make the table have CExpr type so that conditionals can be put in it
         if has_reflections or has_rotations:
@@ -345,79 +346,33 @@ class IntegralGenerator(object):
             return [L.ArrayDecl(
                 "const double", name, table.shape, table, alignas=alignas, padlen=padlen)]
 
-        # Apply reflections (for FaceTangent dofs)
-        for entity, dofs in rot:
-            if entity[0] != 2:
+        # Correct data for rotations and reflections of face tangents
+        for (entity_dim, entity_n), face_tangent_data in rot.items():
+            if entity_dim != 2:
                 warnings.warn("Face tangents an entity of dim != 2 not implemented.")
                 continue
-            # Check that either all in the dofmap, or not in the dofmap.
-            # If they are not, skip this pair
-            included = [dof in dofmap for dof in dofs]
-            if False in included:
-                if True in included:
-                    warnings.warn("Non-zero dof may have been stripped from table.")
-                continue
 
-            # Swap the values of two dofs if their face is reflected
-            reflected = self.backend.symbols.entity_reflection(L, entity, self.ir.cell_shape)
-            di0 = dofmap.index(dofs[0])
-            di1 = dofmap.index(dofs[1])
             for indices in itertools.product(*[range(n) for n in table.shape[:-1]]):
-                indices0 = indices + (di0, )
-                indices1 = indices + (di1, )
-                temp0 = table[indices0]
-                temp1 = table[indices1]
-                table[indices0] = L.Conditional(reflected, temp1, temp0)
-                table[indices1] = L.Conditional(reflected, temp0, temp1)
+                # Store current values in temps
+                temps = {}
+                for perm, ft in face_tangent_data.items():
+                    for combo in ft.values():
+                        for dof, w in combo:
+                            if dof in dofmap:
+                                temps[dof] = table[indices + (dofmap.index(dof), )]
+                # Replace values with conditionals containing linear combinations of values in temps
+                for perm, ft in face_tangent_data.items():
+                    entity_perm = self.backend.symbols.entity_permutation(L, (entity_dim, entity_n), self.ir.cell_shape)
+                    for dof, combo in ft.items():
+                        if dof in dofmap:
+                            table[indices + (dofmap.index(dof), )] = L.Conditional(
+                                L.EQ(entity_perm, perm),
+                                sum(w * temps[dof] for dof, w in combo),
+                                table[indices + (dofmap.index(dof), )]
+                            )
 
-        parts = []
-        # Define the table; do not make it const, as it may be changed by rotations
-        parts.append(L.ArrayDecl(
-            "double", name, table.shape, table, alignas=alignas, padlen=padlen))
-
-        # Apply rotations (for FaceTangent dofs)
-        t = self.backend.symbols.named_table(name)
-        temp0 = L.Symbol("t0")
-        temp1 = L.Symbol("t1")
-        for entity, dofs in rot:
-            if entity[0] != 2:
-                warnings.warn("Face tangents an entity of dim != 2 not implemented.")
-                continue
-            # Check that either all in the dofmap, or not in the dofmap.
-            # If they are not, skip this pair
-            included = [dof in dofmap for dof in dofs]
-            if False in included:
-                if True in included:
-                    warnings.warn("Non-zero dof may have been stripped from table.")
-                continue
-
-            # Generate statements that rotate the dofs if their face is rotated
-            indices0 = index_names + [dofmap.index(dofs[0])]
-            indices1 = index_names + [dofmap.index(dofs[1])]
-            body0 = [
-                L.VariableDecl("const double", temp0, t[indices0]),
-                L.VariableDecl("const double", temp1, t[indices1]),
-                L.Assign(t[indices0], -temp0 - temp1),
-                L.Assign(t[indices1], temp0)
-            ]
-            body1 = [
-                L.VariableDecl("const double", temp0, t[indices0]),
-                L.VariableDecl("const double", temp1, t[indices1]),
-                L.Assign(t[indices0], temp1),
-                L.Assign(t[indices1], -temp0 - temp1)
-            ]
-
-            # Add for loops over all dimensions of the table with size >1
-            for k, index in enumerate(index_names):
-                if isinstance(index, str):
-                    body0 = L.ForRange(index, 0, table.shape[k], body0)
-                    body1 = L.ForRange(index, 0, table.shape[k], body1)
-            # Do rotation if the face is rotated
-            rotations = self.backend.symbols.entity_rotations(L, entity, self.ir.cell_shape)
-            parts += [L.If(L.EQ(rotations, 1), body0),
-                      L.ElseIf(L.EQ(rotations, 2), body1)]
-
-        return parts
+        return [L.ArrayDecl(
+            "const double", name, table.shape, table, alignas=alignas, padlen=padlen)]
 
     def generate_quadrature_loop(self, quadrature_rule):
         """Generate quadrature loop with for this num_points."""
@@ -669,7 +624,6 @@ class IntegralGenerator(object):
 
     def generate_dofblock_partition(self, quadrature_rule):
         block_contributions = self.ir.integrand[quadrature_rule]["block_contributions"]
-
         preparts = []
         quadparts = []
         blocks = [(blockmap, blockdata)
@@ -809,9 +763,6 @@ class IntegralGenerator(object):
         # Define fw = f * weight
         assert not blockdata.transposed, "Not handled yet"
 
-        # Fetch code to access modified arguments
-        arg_factors = self.get_arg_factors(blockdata, block_rank, quadrature_rule, iq, B_indices)
-
         fw_rhs = L.float_product([f, weight])
         if not isinstance(fw_rhs, L.Product):
             fw = fw_rhs
@@ -829,17 +780,50 @@ class IntegralGenerator(object):
         Asym = self.backend.symbols.element_tensor()
         A = L.FlattenedArray(Asym, dims=A_shape)
 
-        B_rhs = L.float_product([fw] + arg_factors)
-        A_indices = []
-
+        # Check if DOFs in dofrange are equally spaced
+        expand_loop = False
         for i, bm in enumerate(blockmap):
-            offset = blockmap[i][0]
-            A_indices.append(arg_indices[i] + offset)
+            for a, b in zip(bm[1:-1], bm[2:]):
+                if b - a != bm[1] - bm[0]:
+                    expand_loop = True
+                    break
+            else:
+                continue
+            break
 
-        body = L.AssignAdd(A[A_indices], B_rhs)
+        if expand_loop:
+            # If DOFs in dofrange are not equally spaced, then expand out the for loop
+            for A_indices, B_indices in zip(itertools.product(*blockmap),
+                                            itertools.product(*[range(len(b)) for b in blockmap])):
+                quadparts += [
+                    L.AssignAdd(
+                        A[A_indices],
+                        L.float_product([fw] + self.get_arg_factors(
+                            blockdata, block_rank,
+                            quadrature_rule, iq, B_indices)
+                        )
+                    )
+                ]
+        else:
+            # Fetch code to access modified arguments
+            arg_factors = self.get_arg_factors(blockdata, block_rank, quadrature_rule, iq, B_indices)
 
-        for i in reversed(range(block_rank)):
-            body = L.ForRange(B_indices[i], 0, blockdims[i], body=body)
-        quadparts += [body]
+            B_rhs = L.float_product([fw] + arg_factors)
+            A_indices = []
+
+            for bm, index in zip(blockmap, arg_indices):
+                # TODO: switch order here? (optionally)
+                offset = bm[0]
+                if len(bm) == 1:
+                    A_indices.append(index + offset)
+                else:
+                    block_size = bm[1] - bm[0]
+                    A_indices.append(block_size * index + offset)
+
+            body = L.AssignAdd(A[A_indices], B_rhs)
+
+            for i in reversed(range(block_rank)):
+                body = L.ForRange(B_indices[i], 0, blockdims[i], body=body)
+            quadparts += [body]
 
         return preparts, quadparts

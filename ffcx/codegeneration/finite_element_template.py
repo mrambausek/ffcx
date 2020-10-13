@@ -66,7 +66,7 @@ ufc_finite_element* create_sub_element_{factory_name}(int i)
 
 ufc_finite_element* create_{factory_name}(void)
 {{
-  ufc_finite_element* element = malloc(sizeof(*element));
+  ufc_finite_element* element = (ufc_finite_element*)malloc(sizeof(*element));
 
   element->signature = {signature};
   element->cell_shape = {cell_shape};
@@ -81,6 +81,7 @@ ufc_finite_element* create_{factory_name}(void)
   element->reference_value_size = {reference_value_size};
   element->degree = {degree};
   element->family = {family};
+  element->block_size = {block_size};
   element->evaluate_reference_basis = evaluate_reference_basis_{factory_name};
   element->evaluate_reference_basis_derivatives = evaluate_reference_basis_derivatives_{factory_name};
   element->transform_reference_basis_derivatives = transform_reference_basis_derivatives_{factory_name};

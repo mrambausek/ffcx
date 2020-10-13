@@ -66,7 +66,7 @@ def clamp_table_small_numbers(table,
     return table
 
 
-def strip_table_zeros(table, rtol=default_rtol, atol=default_atol):
+def strip_table_zeros(table, block_size, rtol=default_rtol, atol=default_atol):
     """Strip zero columns from table. Returns column range (begin, end) and the new compact table."""
     # Get shape of table and number of columns, defined as the last axis
     table = numpy.asarray(table)
@@ -85,7 +85,14 @@ def strip_table_zeros(table, rtol=default_rtol, atol=default_atol):
         begin = 0
         end = 0
 
-    dofmap = tuple(range(begin, end))
+    for i in dofmap:
+        if i % block_size != dofmap[0] % block_size:
+            # If dofs are not all in the same block component, don't remove intermediate zeros
+            dofmap = tuple(range(begin, end))
+            break
+    else:
+        # If dofs are all in the same block component, keep only that block component
+        dofmap = tuple(range(begin, end, block_size))
 
     # Make subtable by dropping zero columns
     stripped_table = table[..., dofmap]
@@ -207,6 +214,19 @@ def get_ffcx_table_values(points, cell, integral_type, ufl_element, avg, entityt
 
         component_element = fiat_element.elements()[component_element_index]
 
+        # Get the block size to switch XXYYZZ ordering to XYZXYZ
+        if isinstance(ufl_element, ufl.VectorElement) or isinstance(ufl_element, ufl.TensorElement):
+            block_size = fiat_element.num_sub_elements()
+            ir = [ir[0] * block_size // irange[-1], irange[-1], block_size]
+
+        def slice_size(r):
+            if len(r) == 1:
+                return r[0]
+            if len(r) == 2:
+                return r[1] - r[0]
+            if len(r) == 3:
+                return 1 + (r[1] - r[0] - 1) // r[2]
+
         # Follows from FIAT's MixedElement tabulation
         # Tabulating MixedElement in FIAT would result in tabulated subelements
         # padded with zeros
@@ -220,7 +240,7 @@ def get_ffcx_table_values(points, cell, integral_type, ufl_element, avg, entityt
             padded_shape = (fiat_element.space_dimension(),) + fiat_element.value_shape() + (len(entity_points), )
             padded_tbl = numpy.zeros(padded_shape, dtype=tbl.dtype)
 
-            tab = tbl.reshape(ir[1] - ir[0], cr[1] - cr[0], -1)
+            tab = tbl.reshape(slice_size(ir), slice_size(cr), -1)
             padded_tbl[slice(*ir), slice(*cr)] = tab
 
             component_tables.append(padded_tbl[:, flat_component, :])
@@ -311,13 +331,14 @@ def get_modified_terminal_element(mt):
     elif isinstance(mt.terminal, ufl.classes.Jacobian):
         if mt.reference_value:
             raise RuntimeError("Not expecting reference value of J.")
-        if gd:
-            raise RuntimeError("Not expecting global derivatives of J.")
+
         element = mt.terminal.ufl_domain().ufl_coordinate_element()
-        # Translate component J[i,d] to x element context rgrad(x[i])[d]
         assert len(mt.component) == 2
+        # Translate component J[i,d] to x element context rgrad(x[i])[d]
         fc, d = mt.component  # x-component, derivative
-        ld = tuple(sorted((d, ) + ld))
+
+        # Grad(Jacobian(...)) should be a local derivative
+        ld = tuple(sorted((d, ) + gd + ld))
     else:
         return None
 
@@ -532,8 +553,12 @@ def optimize_element_tables(tables,
 
         # Store original dof dimension before compressing
         num_dofs = tbl.shape[3]
+        ufl_element = table_origins[name][0]
+        block_size = 1
+        if isinstance(ufl_element, ufl.VectorElement) or isinstance(ufl_element, ufl.TensorElement):
+            block_size = len(ufl_element.sub_elements())
 
-        dofrange, dofmap, tbl = strip_table_zeros(tbl, rtol=rtol, atol=atol)
+        dofrange, dofmap, tbl = strip_table_zeros(tbl, block_size, rtol=rtol, atol=atol)
 
         compressed_tables[name] = tbl
         table_ranges[name] = dofrange
@@ -557,11 +582,11 @@ def optimize_element_tables(tables,
 
     # Build mapping from unique table name to the table itself
     unique_tables = {}
+    unique_table_origins = {}
     for ui, tbl in enumerate(unique_tables_list):
         uname = unique_names[ui]
         unique_tables[uname] = tbl
-
-    unique_table_origins = {}
+        unique_table_origins[uname] = table_origins[uname]
 
     return unique_tables, unique_table_origins, table_unames, table_ranges, table_dofmaps, table_permuted, \
         table_original_num_dofs
@@ -709,6 +734,7 @@ def build_optimized_tables(quadrature_rule,
         unique_table_ttypes[ename] = unique_table_ttypes[uname]
         del unique_table_ttypes[uname]
 
+    needs_permutation_data = False
     # Build mapping from modified terminal to unique table with metadata
     # { mt: (unique name,
     #        (table dof range begin, table dof range end),
@@ -721,6 +747,8 @@ def build_optimized_tables(quadrature_rule,
         dofmap = table_dofmaps[name]
         original_dim = table_original_num_dofs[name]
         is_permuted = table_permuted[name]
+        if is_permuted:
+            needs_permutation_data = True
 
         # Map name -> uname
         uname = table_unames[name]
@@ -744,4 +772,5 @@ def build_optimized_tables(quadrature_rule,
             ename, unique_tables[ename], dofrange, dofmap, original_dim, ttype,
             ttype in piecewise_ttypes, ttype in uniform_ttypes, is_permuted)
 
-    return unique_tables, unique_table_ttypes, unique_table_num_dofs, mt_unique_table_reference, table_origins
+    return (unique_tables, unique_table_ttypes, unique_table_num_dofs,
+            mt_unique_table_reference, table_origins, needs_permutation_data)
